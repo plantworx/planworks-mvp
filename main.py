@@ -27,6 +27,7 @@ from google.genai.types import Content, Part
 from app import root_agent
 from app.plantworks_agents import extract_plant_query
 from app.plantworks_tools import plant_database_search, PlantSearchInput
+from app.plant_rag_api import router as plant_rag_router
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -38,6 +39,9 @@ app = FastAPI(
     description="An API for interacting with the Plantworks agent.",
     version="1.0.0"
 )
+
+# Mount the plant RAG API at /api
+app.include_router(plant_rag_router, prefix="/api")
 
 # Initialize the runner once at startup
 runner = InMemoryRunner(agent=root_agent)
@@ -66,19 +70,11 @@ async def shutdown_event():
 async def chat_with_agent(request: ChatRequest):
     """Receives a query and returns the agent's response."""
     logger.info(f"Received query for user '{request.user_id}' in session '{request.session_id}': {request.query}")
-    plant_name = extract_plant_query(request.query)
-    if plant_name:
-        logger.info(f"Detected plant info query for '{plant_name}', routing to plant_database_search.")
-        result = plant_database_search(PlantSearchInput(query=plant_name, limit=3))
-        if result and result.get("results"):
-            answer = f"Here is information about {plant_name}:\n{result['results']}"
-        else:
-            answer = f"Sorry, I couldn't find any information about {plant_name}."
-        logger.info(f"Agent response: {answer}")
-        return ChatResponse(response=answer)
+    # Directly send all queries to the LLM agent (no plant query routing)
 
-    # Not a plant info query, proceed with LLM agent
+    # Pass the user query as a Content object with a list of Part objects (only 'text'), matching ADK runner schema
     message = Content(parts=[Part(text=request.query)])
+    logger.info(f"Message sent to agent runner: {message}")
     final_response = "Sorry, I could not process your request."
 
     try:
