@@ -696,8 +696,8 @@ async def run_server(agent: BaseAgent, host: str = "0.0.0.0", port: int = 8000):
     server = uvicorn.Server(config)
     await server.serve()
 
-# Mock google_search tool
-def google_search(query: str) -> Dict[str, Any]:
+# Mock Google Search tool
+def Google Search(query: str) -> Dict[str, Any]:
     """Mock Google search tool."""
     return {
         "query": query,
@@ -709,4 +709,3 @@ def google_search(query: str) -> Dict[str, Any]:
             }
         ]
     }
-

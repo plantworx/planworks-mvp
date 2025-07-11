@@ -21,9 +21,8 @@ from datetime import datetime, timedelta
 import asyncio
 from geopy.geocoders import Nominatim
 from geopy.exc import GeocoderTimedOut
+from app.google_search import google_plant_search
 
-# Use ADK simulation until official package is available
-from .adk_simulation import Tool
 from pydantic import BaseModel, Field
 
 
@@ -133,92 +132,26 @@ def clean_plant_query(query: str) -> str:
 
 
 # --- LEARN AGENT TOOLS ---
-@Tool
 def plant_database_search(input_data: PlantSearchInput) -> Dict[str, Any]:
     """
-    Search comprehensive plant databases for detailed botanical information.
-    
-    This tool searches multiple plant databases including Trefle.io, GBIF, and other
-    botanical resources to provide comprehensive plant information.
+    Search for plant information using Google Custom Search (fallbacks to mock data).
     """
-    results = {
-        "query": input_data.query,
-        "results": [],
-        "total_found": 0,
-        "sources": []
-    }
-    
-    # Mock implementation - in production, integrate with real APIs
-    # Trefle.io API integration would go here
-    trefle_api_key = os.getenv("TREFLE_API_KEY")
-    
-    if trefle_api_key:
-        # Real Trefle.io API call
-        trefle_url = "https://trefle.io/api/v1/plants/search"
-        headers = {"Authorization": f"Bearer {trefle_api_key}"}
-        cleaned_query = clean_plant_query(input_data.query)
-        params = {"q": cleaned_query, "limit": input_data.limit}
-        
-        trefle_data = make_api_request(trefle_url, headers, params)
-        if trefle_data and "data" in trefle_data:
-            for plant in trefle_data["data"]:
-                results["results"].append({
-                    "scientific_name": plant.get("scientific_name"),
-                    "common_name": plant.get("common_name"),
-                    "family": plant.get("family"),
-                    "genus": plant.get("genus"),
-                    "image_url": plant.get("image_url"),
-                    "source": "Trefle.io"
-                })
-            results["sources"].append("Trefle.io")
-    
-    # Fallback to mock data for demonstration
-    if not results["results"]:
-        mock_plants = [
-            {
-                "scientific_name": "Monstera deliciosa",
-                "common_name": "Swiss Cheese Plant",
-                "family": "Araceae",
-                "genus": "Monstera",
-                "description": "Popular houseplant with distinctive split leaves",
-                "care_level": "Easy",
-                "light_requirements": "Bright, indirect light",
-                "water_frequency": "Weekly",
-                "source": "Mock Database"
-            },
-            {
-                "scientific_name": "Ficus lyrata",
-                "common_name": "Fiddle Leaf Fig",
-                "family": "Moraceae", 
-                "genus": "Ficus",
-                "description": "Large-leafed houseplant popular in interior design",
-                "care_level": "Intermediate",
-                "light_requirements": "Bright, indirect light",
-                "water_frequency": "When top soil is dry",
-                "source": "Mock Database"
-            },
-            {
-                "scientific_name": "Sansevieria trifasciata",
-                "common_name": "Snake Plant",
-                "family": "Asparagaceae",
-                "genus": "Sansevieria",
-                "description": "Hardy succulent with upright sword-like leaves",
-                "care_level": "Very Easy",
-                "light_requirements": "Low to bright light",
-                "water_frequency": "Every 2-3 weeks",
-                "source": "Mock Database"
-            }
-        ]
-        
-        # Filter mock results based on query
+    try:
+        return google_plant_search(input_data.query, num_results=input_data.limit)
+    except Exception as e:
+        logging.error(f"Google search exception: {e}")
+        return {
+            "results": [
+                {"title": "Mock Plant Info", "snippet": "This is mock plant data.", "link": "https://en.wikipedia.org/wiki/Plant"}
+            ],
+            "sources": ["mock"]
+        }
         query_lower = input_data.query.lower()
         for plant in mock_plants:
             if (query_lower in plant["scientific_name"].lower() or 
                 query_lower in plant["common_name"].lower() or
                 any(query_lower in str(v).lower() for v in plant.values())):
                 results["results"].append(plant)
-        
-        # Apply limit to results
         results["results"] = results["results"][:input_data.limit]
         results["sources"].append("Mock Database")
     
@@ -227,7 +160,6 @@ def plant_database_search(input_data: PlantSearchInput) -> Dict[str, Any]:
 
 
 # --- GROW AGENT TOOLS ---
-@Tool
 def weather_lookup(input_data: WeatherInput) -> Dict[str, Any]:
     """
     Get current weather and forecast data for plant care decisions.
@@ -247,51 +179,31 @@ def weather_lookup(input_data: WeatherInput) -> Dict[str, Any]:
     if not coords:
         return {"error": "Could not geocode location"}
     
+    openweather_api_key = os.getenv("OPENWEATHER_API_KEY")
+    if not openweather_api_key:
+        logging.warning("OPENWEATHER_API_KEY not set!")
+        return {"error": "OpenWeather API key not set"}
+    
     lat, lon = coords
     
-    # OpenWeatherMap API integration
-    api_key = os.getenv("OPENWEATHER_API_KEY")
-    if api_key:
-        # Current weather
-        current_url = "https://api.openweathermap.org/data/2.5/weather"
-        current_params = {
-            "lat": lat,
-            "lon": lon,
-            "appid": api_key,
-            "units": "metric"
-        }
-        
-        current_data = make_api_request(current_url, params=current_params)
-        if current_data:
+    try:
+        url = f"https://api.openweathermap.org/data/2.5/weather?lat={lat}&lon={lon}&appid={openweather_api_key}&units=metric"
+        resp = requests.get(url, timeout=10)
+        if resp.status_code == 200:
+            data = resp.json()
             weather_data["current"] = {
-                "temperature": current_data["main"]["temp"],
-                "humidity": current_data["main"]["humidity"],
-                "description": current_data["weather"][0]["description"],
-                "wind_speed": current_data["wind"]["speed"],
-                "pressure": current_data["main"]["pressure"]
+                "temperature": data["main"]["temp"],
+                "humidity": data["main"]["humidity"],
+                "weather": data["weather"][0]["description"],
+                "wind_speed": data["wind"]["speed"],
+                "uv_index": None  # Not available in free tier
             }
-        
-        # Forecast
-        forecast_url = "https://api.openweathermap.org/data/2.5/forecast"
-        forecast_params = {
-            "lat": lat,
-            "lon": lon,
-            "appid": api_key,
-            "units": "metric",
-            "cnt": input_data.days * 8  # 8 forecasts per day (3-hour intervals)
-        }
-        
-        forecast_data = make_api_request(forecast_url, params=forecast_params)
-        if forecast_data and "list" in forecast_data:
-            for item in forecast_data["list"][:input_data.days]:
-                weather_data["forecast"].append({
-                    "date": item["dt_txt"],
-                    "temperature": item["main"]["temp"],
-                    "humidity": item["main"]["humidity"],
-                    "description": item["weather"][0]["description"],
-                    "precipitation": item.get("rain", {}).get("3h", 0)
-                })
-    
+        else:
+            logging.error(f"OpenWeather API error: {resp.status_code} {resp.text}")
+            return {"error": f"OpenWeather API error: {resp.status_code}"}
+    except Exception as e:
+        logging.error(f"OpenWeather API exception: {e}")
+        return {"error": f"OpenWeather API exception: {e}"}
     # Mock data fallback
     if not weather_data["current"]:
         weather_data["current"] = {
@@ -327,7 +239,6 @@ def weather_lookup(input_data: WeatherInput) -> Dict[str, Any]:
     return weather_data
 
 
-@Tool
 def plant_care_scheduler(input_data: CareScheduleInput) -> Dict[str, Any]:
     """
     Create personalized care schedules based on plant needs and local conditions.
@@ -417,7 +328,6 @@ def plant_care_scheduler(input_data: CareScheduleInput) -> Dict[str, Any]:
     return schedule
 
 
-@Tool
 def disease_identifier(input_data: DiseaseIdentificationInput) -> Dict[str, Any]:
     """
     Identify plant diseases and pests from symptoms and images.
@@ -508,7 +418,6 @@ def disease_identifier(input_data: DiseaseIdentificationInput) -> Dict[str, Any]
 
 
 # --- LOCAL ENVIRONMENT AGENT TOOLS ---
-@Tool
 def native_plant_finder(input_data: NativePlantInput) -> Dict[str, Any]:
     """
     Find native plants suitable for a specific geographic location.
@@ -622,7 +531,6 @@ def native_plant_finder(input_data: NativePlantInput) -> Dict[str, Any]:
     return results
 
 
-@Tool
 def soil_analyzer(input_data: SoilAnalysisInput) -> Dict[str, Any]:
     """
     Analyze soil conditions and provide improvement recommendations.
@@ -719,7 +627,6 @@ def soil_analyzer(input_data: SoilAnalysisInput) -> Dict[str, Any]:
     return analysis
 
 
-@Tool
 def hardiness_zone_lookup(input_data: HardinessZoneInput) -> Dict[str, Any]:
     """
     Determine USDA hardiness zone and climate information for a location.
@@ -827,7 +734,6 @@ def hardiness_zone_lookup(input_data: HardinessZoneInput) -> Dict[str, Any]:
 
 
 # --- MARKETPLACE AGENT TOOLS ---
-@Tool
 def marketplace_search(input_data: MarketplaceSearchInput) -> Dict[str, Any]:
     """
     Search multiple plant marketplaces and nurseries for plant availability.
@@ -974,7 +880,6 @@ def marketplace_search(input_data: MarketplaceSearchInput) -> Dict[str, Any]:
     return results
 
 
-@Tool
 def price_comparator(input_data: PriceComparisonInput) -> Dict[str, Any]:
     """
     Compare prices for a specific plant across multiple sellers.
@@ -1065,7 +970,6 @@ def price_comparator(input_data: PriceComparisonInput) -> Dict[str, Any]:
     return comparison
 
 
-@Tool
 def seller_verifier(input_data: SellerVerificationInput) -> Dict[str, Any]:
     """
     Verify seller reputation and quality ratings.
@@ -1195,4 +1099,3 @@ def seller_verifier(input_data: SellerVerificationInput) -> Dict[str, Any]:
         ]
     
     return verification
-

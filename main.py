@@ -12,43 +12,111 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from dotenv import load_dotenv; load_dotenv()
 import asyncio
 import logging
 import os
 from pathlib import Path
 
-# Use ADK simulation until official package is available
-from app.adk_simulation import run_server
+import uvicorn
+from fastapi import FastAPI
+from pydantic import BaseModel
+
+from google.adk.runners import InMemoryRunner
+from google.genai.types import Content, Part
 from app import root_agent
+from app.plantworks_agents import extract_plant_query
+from app.plantworks_tools import plant_database_search, PlantSearchInput
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-async def main():
-    """Main entry point for the Plantworks ADK application."""
-    logger.info("🌱 Starting Plantworks ADK Server (Simulation Mode)")
-    
-    # Set up environment
-    port = int(os.environ.get("PORT", 8001))
-    host = os.environ.get("HOST", "0.0.0.0")
-    
-    logger.info(f"🚀 Server will run on {host}:{port}")
+# --- FastAPI App --- 
+app = FastAPI(
+    title="Plantworks ADK Server",
+    description="An API for interacting with the Plantworks agent.",
+    version="1.0.0"
+)
+
+# Initialize the runner once at startup
+runner = InMemoryRunner(agent=root_agent)
+
+class ChatRequest(BaseModel):
+    query: str
+    user_id: str = "web_user"
+    session_id: str = "web_session"
+
+class ChatResponse(BaseModel):
+    response: str
+
+@app.on_event("startup")
+async def startup_event():
+    logger.info("🌱 Initializing Plantworks Agent Runner")
     logger.info(f"📚 Agent: {root_agent.name}")
     logger.info(f"🛠️ Tools available: {len(root_agent.tools)}")
     logger.info(f"👥 Sub-agents: {len(root_agent.sub_agents)}")
-    
-    # List available tools
-    tool_names = [getattr(tool, '__name__', str(tool)) for tool in root_agent.tools]
-    logger.info(f"🔧 Tools: {', '.join(tool_names)}")
-    
-    # Run the ADK server
-    await run_server(
-        agent=root_agent,
-        host=host,
-        port=port
-    )
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    logger.info("🤖 Shutting down runner.")
+    await runner.close()
+
+@app.post("/chat", response_model=ChatResponse)
+async def chat_with_agent(request: ChatRequest):
+    """Receives a query and returns the agent's response."""
+    logger.info(f"Received query for user '{request.user_id}' in session '{request.session_id}': {request.query}")
+    plant_name = extract_plant_query(request.query)
+    if plant_name:
+        logger.info(f"Detected plant info query for '{plant_name}', routing to plant_database_search.")
+        result = plant_database_search(PlantSearchInput(query=plant_name, limit=3))
+        if result and result.get("results"):
+            answer = f"Here is information about {plant_name}:\n{result['results']}"
+        else:
+            answer = f"Sorry, I couldn't find any information about {plant_name}."
+        logger.info(f"Agent response: {answer}")
+        return ChatResponse(response=answer)
+
+    # Not a plant info query, proceed with LLM agent
+    message = Content(parts=[Part(text=request.query)])
+    final_response = "Sorry, I could not process your request."
+
+    try:
+        # Ensure a session exists before running the agent
+        session_service = runner.session_service
+        session = await session_service.get_session(
+            session_id=request.session_id, app_name=runner.app_name, user_id=request.user_id
+        )
+        if not session:
+            logger.info(f"Creating new session: {request.session_id}")
+            await session_service.create_session(
+                session_id=request.session_id, user_id=request.user_id, app_name=runner.app_name
+            )
+
+        async for event in runner.run_async(
+            user_id=request.user_id,
+            session_id=request.session_id,
+            new_message=message
+        ):
+            logger.info(f"Received event: {event}")
+            if event.is_final_response():
+                if event.content and event.content.parts:
+                    # Combine all text parts to form the final response.
+                    text_parts = [part.text for part in event.content.parts if part.text]
+                    if text_parts:
+                        final_response = "".join(text_parts)
+                break # Exit after getting the final message
+        
+        logger.info(f"Agent response: {final_response}")
+        return ChatResponse(response=final_response)
+    except Exception as e:
+        logger.error(f"An error occurred during agent execution: {e}", exc_info=True)
+        return ChatResponse(response="An error occurred while processing your request.")
+
 
 if __name__ == "__main__":
-    asyncio.run(main())
-
+    port = int(os.environ.get("PORT", 8001))
+    host = os.environ.get("HOST", "127.0.0.1")
+    logger.info(f"🚀 Starting FastAPI server on {host}:{port} (reload enabled)")
+    # Always enable reload for development convenience
+    uvicorn.run("main:app", host=host, port=port, reload=True)

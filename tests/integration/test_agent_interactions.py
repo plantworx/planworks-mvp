@@ -16,7 +16,7 @@ import pytest
 import asyncio
 import httpx
 from unittest.mock import patch
-from app.adk_simulation import run_server, InvocationContext, SessionState
+from tests.adk_simulation import run_server, InvocationContext, SessionState
 from app.plantworks_agents import plantworks_main_agent
 from tests.conftest import TestConfig
 
@@ -322,4 +322,3 @@ class TestBusinessLogic:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
-

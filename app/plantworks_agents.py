@@ -17,8 +17,9 @@ import logging
 from typing import Literal, Optional, List, Dict, Any
 from collections.abc import AsyncGenerator
 
-# Use ADK simulation until official package is available
-from google.adk.agents import BaseAgent, LlmAgent, AgentTool, google_search
+from google.adk.agents import BaseAgent, LlmAgent
+from google.adk.tools import google_search
+from google.adk.tools.agent_tool import AgentTool
 from pydantic import BaseModel, Field
 
 from .config import config
@@ -95,9 +96,13 @@ learn_agent = LlmAgent(
     - Plant propagation methods
     - Botanical terminology and scientific naming
 
+    **IMPORTANT:**
+    - When a user asks about a specific plant (e.g., "What is a Cacti?", "Tell me about Monstera"), ALWAYS call the `plant_database_search` tool with the plant name as the query. Return the results to the user in a friendly, informative way.
+    - If the tool returns no results, say so, but never just say you are ready.
+
     **Your Tools:**
     - `plant_database_search`: Search comprehensive plant databases for detailed information
-    - `google_search`: Find the latest botanical research and plant information online
+    - `Google Search`: Find the latest botanical research and plant information online
 
     **Your Personality:**
     - Enthusiastic and passionate about plants
@@ -114,8 +119,7 @@ learn_agent = LlmAgent(
 
     Current date: {datetime.datetime.now().strftime("%Y-%m-%d")}
     """,
-    tools=[plant_database_search, google_search],
-    output_schema=PlantIdentification,
+        tools=[plant_database_search],
 )
 
 grow_agent = LlmAgent(
@@ -156,7 +160,6 @@ grow_agent = LlmAgent(
     Current date: {datetime.datetime.now().strftime("%Y-%m-%d")}
     """,
     tools=[weather_lookup, plant_care_scheduler, disease_identifier, plant_database_search],
-    output_schema=CareRecommendation,
 )
 
 local_environment_agent = LlmAgent(
@@ -196,8 +199,7 @@ local_environment_agent = LlmAgent(
 
     Current date: {datetime.datetime.now().strftime("%Y-%m-%d")}
     """,
-    tools=[native_plant_finder, soil_analyzer, hardiness_zone_lookup, weather_lookup],
-    output_schema=LocalPlantRecommendation,
+    tools=[plant_database_search, native_plant_finder, soil_analyzer, hardiness_zone_lookup, weather_lookup],
 )
 
 marketplace_agent = LlmAgent(
@@ -241,7 +243,6 @@ marketplace_agent = LlmAgent(
     Current date: {datetime.datetime.now().strftime("%Y-%m-%d")}
     """,
     tools=[marketplace_search, price_comparator, seller_verifier],
-    output_schema=MarketplaceResult,
 )
 
 # --- MAIN PLANTWORKS AGENT ---
@@ -285,6 +286,22 @@ plantworks_main_agent = LlmAgent(
     ],
 )
 
-# Export the main agent
-root_agent = plantworks_main_agent
+import re
 
+def extract_plant_query(user_query: str) -> str:
+    """Extract plant name from queries like 'what is a Cacti?', 'tell me about Monstera', etc."""
+    patterns = [
+        r'what is (a |an |the )?(?P<plant>.+)\??',
+        r'tell me about (a |an |the )?(?P<plant>.+)\??',
+        r'information on (a |an |the )?(?P<plant>.+)\??',
+        r'find (a |an |the )?(?P<plant>.+)\??',
+        r'search for (a |an |the )?(?P<plant>.+)\??',
+    ]
+    for pattern in patterns:
+        match = re.match(pattern, user_query.strip(), re.IGNORECASE)
+        if match:
+            return match.group('plant').strip()
+    return ""
+
+# Export the main agent directly (no wrapper needed)
+root_agent = plantworks_main_agent
