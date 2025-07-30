@@ -22,7 +22,6 @@ from unittest.mock import Mock, patch
 # Add app to path for testing
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from app.adk_simulation import LlmAgent, InvocationContext, SessionState
 from app.plantworks_agents import (
     learn_agent, grow_agent, local_environment_agent, marketplace_agent,
     plantworks_main_agent

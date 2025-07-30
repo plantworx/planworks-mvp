@@ -19,7 +19,7 @@ from app.plantworks_agents import (
     learn_agent, grow_agent, local_environment_agent, marketplace_agent,
     plantworks_main_agent
 )
-from app.adk_simulation import InvocationContext, SessionState
+from tests.adk_simulation import InvocationContext, SessionState
 
 
 class TestLearnAgent:
@@ -335,4 +335,3 @@ class TestAgentConfiguration:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
-

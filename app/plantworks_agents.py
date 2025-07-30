@@ -17,8 +17,9 @@ import logging
 from typing import Literal, Optional, List, Dict, Any
 from collections.abc import AsyncGenerator
 
-# Use ADK simulation until official package is available
-from google.adk.agents import BaseAgent, LlmAgent, AgentTool, google_search
+from google.adk.agents import BaseAgent, LlmAgent
+from google.adk.tools import google_search
+from google.adk.tools.agent_tool import AgentTool
 from pydantic import BaseModel, Field
 
 from .config import config
@@ -95,9 +96,13 @@ learn_agent = LlmAgent(
     - Plant propagation methods
     - Botanical terminology and scientific naming
 
+    **IMPORTANT:**
+    - When a user asks about a specific plant (e.g., "What is a Cacti?", "Tell me about Monstera"), ALWAYS call the `plant_database_search` tool with the plant name as the query. Return the results to the user in a friendly, informative way.
+    - If the tool returns no results, say so, but never just say you are ready.
+
     **Your Tools:**
     - `plant_database_search`: Search comprehensive plant databases for detailed information
-    - `google_search`: Find the latest botanical research and plant information online
+    - `Google Search`: Find the latest botanical research and plant information online
 
     **Your Personality:**
     - Enthusiastic and passionate about plants
@@ -114,8 +119,7 @@ learn_agent = LlmAgent(
 
     Current date: {datetime.datetime.now().strftime("%Y-%m-%d")}
     """,
-    tools=[plant_database_search, google_search],
-    output_schema=PlantIdentification,
+        tools=[plant_database_search],
 )
 
 grow_agent = LlmAgent(
@@ -156,7 +160,6 @@ grow_agent = LlmAgent(
     Current date: {datetime.datetime.now().strftime("%Y-%m-%d")}
     """,
     tools=[weather_lookup, plant_care_scheduler, disease_identifier, plant_database_search],
-    output_schema=CareRecommendation,
 )
 
 local_environment_agent = LlmAgent(
@@ -196,8 +199,7 @@ local_environment_agent = LlmAgent(
 
     Current date: {datetime.datetime.now().strftime("%Y-%m-%d")}
     """,
-    tools=[native_plant_finder, soil_analyzer, hardiness_zone_lookup, weather_lookup],
-    output_schema=LocalPlantRecommendation,
+    tools=[plant_database_search, native_plant_finder, soil_analyzer, hardiness_zone_lookup, weather_lookup],
 )
 
 marketplace_agent = LlmAgent(
@@ -241,7 +243,6 @@ marketplace_agent = LlmAgent(
     Current date: {datetime.datetime.now().strftime("%Y-%m-%d")}
     """,
     tools=[marketplace_search, price_comparator, seller_verifier],
-    output_schema=MarketplaceResult,
 )
 
 # --- MAIN PLANTWORKS AGENT ---
@@ -250,25 +251,56 @@ plantworks_main_agent = LlmAgent(
     model=config.worker_model,
     description="The main Plantworks assistant that coordinates all plant-related expertise.",
     instruction=f"""
-    You are the main Plantworks assistant, coordinating a team of plant experts to help users with all their plant-related needs.
+    You MUST NEVER reply with any text, greeting, or readiness message. For EVERY plant-related query, you must ONLY use a function call to a sub-agent or tool, even if you think you are the best agent to answer it. Never generate any text responses yourself—always use a function call.
+    ",
+    function_calling_mode="required",
+    allow_direct_response=False,
+    sub_agents=[],
+    tools=[
+        plant_database_search,
+        google_search,
+        marketplace_search,
+        weather_lookup,
+        native_plant_finder
+    ],
+    4. **If a query could involve more than one sub-agent, you may call multiple in sequence, but always start with the most relevant.**
+    5. **If a tool/sub-agent returns no results, inform the user and suggest a related follow-up.**
+    6. **If a query is not about plants or related topics, politely inform the user that you are specialized for plant-related questions.**
 
-    **Your Team of Experts:**
-    - **The Botanist** (Learn Agent): Plant identification and botanical knowledge
-    - **The Gardener** (Grow Agent): Plant care and cultivation advice  
-    - **The Ecologist** (Local Environment Agent): Local conditions and native plants
-    - **The Merchant** (Marketplace Agent): Plant purchasing and sourcing
+    **Your Team of Experts (Sub-Agents):**
+    - **The Botanist** (learn_agent): Plant identification, botanical knowledge, plant facts.
+    - **The Gardener** (grow_agent): Plant care, cultivation, pest/disease advice, schedules.
+    - **The Ecologist** (local_environment_agent): Native plants, local growing conditions, hardiness zones.
+    - **The Merchant** (marketplace_agent): Plant purchasing, price comparison, seller verification.
 
-    **Your Role:**
-    1. Understand what the user needs
-    2. Coordinate with the appropriate expert(s)
-    3. Provide comprehensive, helpful responses
-    4. Ensure all aspects of the user's plant journey are covered
+    **Available Tools:**
+    - plant_database_search, marketplace_search, weather_lookup, native_plant_finder, etc.
 
-    **Response Guidelines:**
-    - Always be helpful and encouraging about plant care
-    - Provide comprehensive information by leveraging multiple experts when needed
-    - Consider the user's experience level and adjust complexity accordingly
-    - Offer follow-up suggestions and related information
+    **EXAMPLES (ALWAYS use a function call):**
+    - User: "What is a Monstera?"  
+      → Call: learn_agent (or plant_database_search)
+    - User: "How do I care for a snake plant?"  
+      → Call: grow_agent
+    - User: "What plants are native to Austin, TX?"  
+      → Call: local_environment_agent
+    - User: "Where can I buy a fiddle leaf fig?"  
+      → Call: marketplace_agent
+    - User: "Compare prices for pothos."  
+      → Call: marketplace_agent (or price_comparator)
+    - User: "What zone is Seattle in?"  
+      → Call: local_environment_agent
+    - User: "My monstera has yellow leaves."  
+      → Call: grow_agent
+
+    **Response Format:**
+    - For every plant-related query, always call the most relevant sub-agent or tool. Do not answer directly.
+    - If unsure, call the sub-agent most likely to help, then offer suggestions for further follow-up.
+    - If the user asks a multi-part question, answer each part by calling the relevant sub-agent/tool.
+
+    **NEVER:**
+    - Never respond with generic greetings or readiness messages.
+    - Never refuse to use a tool/sub-agent if available.
+    - Never answer plant queries from your own knowledge if a tool/sub-agent can be called.
 
     Current date: {datetime.datetime.now().strftime("%Y-%m-%d")}
     """,
@@ -285,6 +317,22 @@ plantworks_main_agent = LlmAgent(
     ],
 )
 
-# Export the main agent
-root_agent = plantworks_main_agent
+import re
 
+def extract_plant_query(user_query: str) -> str:
+    """Extract plant name from queries like 'what is a Cacti?', 'tell me about Monstera', etc."""
+    patterns = [
+        r'what is (a |an |the )?(?P<plant>.+)\??',
+        r'tell me about (a |an |the )?(?P<plant>.+)\??',
+        r'information on (a |an |the )?(?P<plant>.+)\??',
+        r'find (a |an |the )?(?P<plant>.+)\??',
+        r'search for (a |an |the )?(?P<plant>.+)\??',
+    ]
+    for pattern in patterns:
+        match = re.match(pattern, user_query.strip(), re.IGNORECASE)
+        if match:
+            return match.group('plant').strip()
+    return ""
+
+# Export the main agent directly (no wrapper needed)
+root_agent = plantworks_main_agent
