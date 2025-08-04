@@ -137,6 +137,7 @@ def plant_database_search(input_data: PlantSearchInput) -> Dict[str, Any]:
     Search for plant information using Google Custom Search (fallbacks to mock data).
     """
     try:
+        logging.info(f"About to google search for plant data: {input_data}")
         return google_plant_search(input_data.query, num_results=input_data.limit)
     except Exception as e:
         logging.error(f"Google search exception: {e}")

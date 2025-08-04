@@ -22,8 +22,8 @@ from unittest.mock import Mock, patch
 # Add app to path for testing
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from app.plantworks_agents import (
-    learn_agent, grow_agent, local_environment_agent, marketplace_agent,
+from app.agent import (
+    botanist_agent, grow_agent, local_environment_agent, marketplace_agent,
     plantworks_main_agent
 )
 from app.plantworks_tools import (
@@ -152,7 +152,7 @@ def mock_api_responses():
 def test_agents():
     """Provide test agents for integration testing."""
     return {
-        "learn_agent": learn_agent,
+        "learn_agent": botanist_agent,
         "grow_agent": grow_agent,
         "local_environment_agent": local_environment_agent,
         "marketplace_agent": marketplace_agent,

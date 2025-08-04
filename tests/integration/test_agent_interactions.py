@@ -17,7 +17,7 @@ import asyncio
 import httpx
 from unittest.mock import patch
 from tests.adk_simulation import run_server, InvocationContext, SessionState
-from app.plantworks_agents import plantworks_main_agent
+from app.agent import plantworks_main_agent
 from tests.conftest import TestConfig
 
 
