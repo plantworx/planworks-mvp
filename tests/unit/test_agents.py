@@ -15,8 +15,8 @@
 import pytest
 import asyncio
 from unittest.mock import patch, Mock
-from app.plantworks_agents import (
-    learn_agent, grow_agent, local_environment_agent, marketplace_agent,
+from app.agent import (
+    botanist_agent, grow_agent, local_environment_agent, marketplace_agent,
     plantworks_main_agent
 )
 from tests.adk_simulation import InvocationContext, SessionState
@@ -28,16 +28,16 @@ class TestLearnAgent:
     @pytest.mark.asyncio
     async def test_learn_agent_initialization(self):
         """Test learn agent is properly initialized."""
-        assert learn_agent.name == "learn_agent"
-        assert learn_agent.description.startswith("The Botanist")
-        assert len(learn_agent.tools) > 0
+        assert botanist_agent.name == "learn_agent"
+        assert botanist_agent.description.startswith("The Botanist")
+        assert len(botanist_agent.tools) > 0
     
     @pytest.mark.asyncio
     async def test_learn_agent_plant_identification(self, mock_invocation_context):
         """Test learn agent handles plant identification queries."""
         mock_invocation_context.session.state["user_query"] = "What is Monstera deliciosa?"
         
-        response_generator = learn_agent._run_async_impl(mock_invocation_context)
+        response_generator = botanist_agent._run_async_impl(mock_invocation_context)
         response = None
         async for event in response_generator:
             if event.get("type") == "agent_response":
@@ -52,7 +52,7 @@ class TestLearnAgent:
         """Test learn agent handles botanical knowledge queries."""
         mock_invocation_context.session.state["user_query"] = "Tell me about the Araceae family"
         
-        response_generator = learn_agent._run_async_impl(mock_invocation_context)
+        response_generator = botanist_agent._run_async_impl(mock_invocation_context)
         response = None
         async for event in response_generator:
             if event.get("type") == "agent_response":
@@ -293,7 +293,7 @@ class TestAgentConfiguration:
     
     def test_all_agents_have_required_attributes(self):
         """Test all agents have required attributes."""
-        agents = [learn_agent, grow_agent, local_environment_agent, marketplace_agent, plantworks_main_agent]
+        agents = [botanist_agent, grow_agent, local_environment_agent, marketplace_agent, plantworks_main_agent]
         
         for agent in agents:
             assert hasattr(agent, 'name')
@@ -310,14 +310,14 @@ class TestAgentConfiguration:
     
     def test_agent_models_configured(self):
         """Test all agents have proper model configuration."""
-        agents = [learn_agent, grow_agent, local_environment_agent, marketplace_agent, plantworks_main_agent]
+        agents = [botanist_agent, grow_agent, local_environment_agent, marketplace_agent, plantworks_main_agent]
         
         for agent in agents:
             assert agent.model == "gemini-2.0-flash-exp"
     
     def test_agent_tools_not_empty(self):
         """Test all agents have tools configured."""
-        agents = [learn_agent, grow_agent, local_environment_agent, marketplace_agent]
+        agents = [botanist_agent, grow_agent, local_environment_agent, marketplace_agent]
         
         for agent in agents:
             assert len(agent.tools) > 0
